@@ -144,6 +144,8 @@ cpa_mode:
   remove_on_limit_reached: false 
   # 账号彻底死亡(如封号、Token刷新失败)时是否删除 (false 则为不删除，只禁用)
   remove_dead_accounts: false
+  # 是否开启刷新token功能
+  enable_token_revive: false
   # CPA 仓库巡检的间隔时间，默认每60分钟巡检一次
   check_interval_minutes: 60
   #并发线程数配置，默认 10 线程
