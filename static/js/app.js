@@ -43,7 +43,7 @@ createApp({
 			currentPage: 1,
             pageSize: 10,
             totalAccounts: 0,
-            ws: null,
+            evtSource: null,
             stats: {
                 success: 0, failed: 0, retries: 0, total: 0, target: 0,
                 success_rate: '0.0%', elapsed: '0.0s', avg_time: '0.0s', progress_pct: '0%',
@@ -118,6 +118,7 @@ createApp({
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
+					this.logs = [];
                     localStorage.setItem('auth_token', data.token); 
                     this.isLoggedIn = true;
                     this.initApp();
@@ -129,14 +130,18 @@ createApp({
             localStorage.removeItem('auth_token');
             this.isLoggedIn = false;
             this.loginPassword = '';
+			this.logs = [];
             Object.keys(this.showPwd).forEach(k => this.showPwd[k] = false);
-            if(this.ws) this.ws.close();
+			if(this.evtSource) {
+                this.evtSource.close();
+                this.evtSource = null;
+            }
             if(this.statsTimer) clearInterval(this.statsTimer);
         },
         initApp() {
             this.fetchConfig();
             this.fetchAccounts();
-            this.initWebSocket();
+            this.initSSE();
             this.startStatsPolling();
         },
         startStatsPolling() {
@@ -369,11 +374,29 @@ createApp({
             try {
                 const res = await this.authFetch('/api/stop', { method: 'POST' });
                 const data = await res.json();
-                this.showToast(data.message, "info");
+                this.showToast("任务已停止", "info");
+                this.isRunning = false;
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('zh-CN', { hour12: false }); // 获取如 14:30:05 格式
+                this.logs.push({
+                    parsed: true,
+                    time: timeStr,
+                    level: '系统',
+                    text: '🛑 接收到紧急停止指令，引擎已停止运行！',
+                    raw: `[${timeStr}] [系统] 🛑 接收到紧急停止指令，引擎已停止运行！`
+                });
+
+                this.$nextTick(() => {
+                    const container = document.getElementById('terminal-container');
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                });
                 this.pollStats();
-            } catch (e) {}
+            } catch (e) {
+                this.showToast("停止请求发送失败", "error");
+            }
         },
-        
         async bulkPushCPA() {
             if (!this.config.cpa_mode.enable) {
                 this.showToast("🚫 请先开启 CPA 巡检并填写 API", "warning"); return;
@@ -430,35 +453,35 @@ createApp({
             this.logs = []; 
             try { await this.authFetch('/api/logs/clear', { method: 'POST' }); } catch (e) {}
         },
-        initWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+		initSSE() {
+            if (this.evtSource) {
+                this.evtSource.close();
+            }
+
             const token = localStorage.getItem('auth_token');
-            this.ws = new WebSocket(`${protocol}//${window.location.host}/ws/logs?token=${token}`);
-            this.ws.onmessage = (event) => {
-                const lines = event.data.split('\n');
+            const url = `/api/logs/stream?token=${token}`;
+            
+            this.evtSource = new EventSource(url);
+            this.evtSource.onmessage = (event) => {
+                let rawText = event.data;
+                rawText = rawText.trim();
+                if (!rawText) return;
                 
-                lines.forEach(rawText => {
-                    rawText = rawText.trim();
-                    if (!rawText) return;
-                    
-                    let logObj = { parsed: false, raw: rawText };
-
-                    const regex = /^\[(.*?)\]\s*\[(.*?)\]\s+(.*)$/;
-                    const match = rawText.match(regex);
-                    
-                    if (match) {
-                        logObj = {
-                            parsed: true,
-                            time: match[1],
-                            level: match[2].toUpperCase(),
-                            text: match[3],
-                            raw: rawText
-                        };
-                    }
-                    
-                    this.logs.push(logObj);
-                });
-
+                let logObj = { parsed: false, raw: rawText };
+                const regex = /^\[(.*?)\]\s*\[(.*?)\]\s+(.*)$/;
+                const match = rawText.match(regex);
+                
+                if (match) {
+                    logObj = {
+                        parsed: true,
+                        time: match[1],
+                        level: match[2].toUpperCase(),
+                        text: match[3],
+                        raw: rawText
+                    };
+                }
+                
+                this.logs.push(logObj);
                 if (this.logs.length > 2000) {
                     this.logs.splice(0, this.logs.length - 2000);
                 }
@@ -474,14 +497,10 @@ createApp({
                 });
             };
 
-            this.ws.onclose = (event) => {
-                if (event.code === 1008) {
-                    this.logout();
-                    this.showToast("WebSocket 安全鉴权失败，请重新登录！", "error");
-                    return;
-                }
-                if(this.isLoggedIn) {
-                    setTimeout(this.initWebSocket, 3000);
+            this.evtSource.onerror = (event) => {
+                console.error("SSE 连接异常，浏览器将自动尝试重连...", event);
+                if (!this.isLoggedIn) {
+                    this.evtSource.close();
                 }
             };
         },
@@ -558,8 +577,6 @@ createApp({
 						
 						this.showToast('🚀 线上列表已自动更新！', 'success');
 					}, 800);
-
-					// =========================================
 
 				} else {
 					this.showToast(data.message || '同步失败', 'error');
