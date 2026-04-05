@@ -749,7 +749,6 @@ def run(proxy: Optional[str]) -> tuple:
         if "/add-phone" in current_url:
             print(f"[{cfg.ts()}] [INFO] OAuth链路触发风控，进入 HeroSMS 手机号验证流程...")
 
-            # 内部自带阻塞等码、重发、换国等机制
             ok, next_url_or_reason = _try_verify_phone_via_hero_sms(
                 session=s_log,
                 proxies=proxies,
@@ -759,7 +758,6 @@ def run(proxy: Optional[str]) -> tuple:
             if ok and next_url_or_reason:
                 print(f"[{cfg.ts()}] [INFO] 手机验证成功，继续 OAuth 链路: {next_url_or_reason}")
 
-                # 情况1：验证完直接重定向到了带有 code= 的最终回调地址
                 if "code=" in next_url_or_reason:
                     return submit_callback_url(
                         callback_url=next_url_or_reason,
@@ -768,7 +766,6 @@ def run(proxy: Optional[str]) -> tuple:
                         proxies=proxies,
                     ), password
 
-                # 情况2：验证完后，服务器要求继续选择 Workspace 或同意 Consent
                 if next_url_or_reason.endswith("/consent") or next_url_or_reason.endswith("/workspace"):
                     auth_cookie2 = s_log.cookies.get("oai-client-auth-session") or ""
                     workspaces2 = _parse_workspace_from_auth_cookie(auth_cookie2)

@@ -220,6 +220,23 @@ def get_email_and_token(proxies: Any = None) -> tuple:
             print(f"[{cfg.ts()}] [ERROR] LuckMail 流程异常: {e}")
             return None, None
 
+    if mode == "tempmail":
+        try:
+            from utils.tempmail_service import TempmailService
+            tm_service = TempmailService(proxies=mail_proxies)
+            email, token = tm_service.create_email()
+
+            if email and token:
+                set_last_email(email)
+                print(f"[{cfg.ts()}] [INFO] Tempmail 成功创建邮箱: ({mask_email(email)})")
+                return email, token
+            else:
+                print(f"[{cfg.ts()}] [ERROR] Tempmail 获取邮箱失败")
+        except Exception as e:
+            print(f"[{cfg.ts()}] [ERROR] Tempmail 流程异常: {e}")
+        return None, None
+
+
     ai_switch_on = getattr(cfg, 'AI_ENABLE_PROFILE', False)
     if ai_switch_on:
         print(f"[{cfg.ts()}] [AI-状态] 已开启 AI 智能邮箱域名信息增强...")
@@ -471,7 +488,7 @@ def get_oai_code(
     base_url = cfg.GPTMAIL_BASE.rstrip("/")
     mode = cfg.EMAIL_API_MODE
 
-    print(f"\n[{cfg.ts()}] [INFO] 等待接收验证码 ({mask_email(email)}) ", end="", flush=True)
+    print(f"\n[{cfg.ts()}] [INFO] 等待接收验证码 ({mask_email(email)})...")
 
     if processed_mail_ids is None:
         processed_mail_ids = set()
@@ -485,7 +502,7 @@ def get_oai_code(
             print(f"\n[{cfg.ts()}] [ERROR] IMAP 初始登录失败: {e}")
             mail_conn = None
 
-    for _ in range(20):
+    for attempt in range(20):
         if getattr(cfg, 'GLOBAL_STOP', False): return ""
         try:
             if mode == "mail_curl":
@@ -536,6 +553,39 @@ def get_oai_code(
                                     processed_mail_ids.add(m_id)
                                     print(f"\n[{cfg.ts()}] [SUCCESS] CloudMail 提取验证码成功: {code}")
                                     return code
+            elif mode == "tempmail":
+                if not jwt:
+                    print(f"\n[{cfg.ts()}] [ERROR] Tempmail 缺少 token，无法提取验证码！")
+                    return ""
+                try:
+                    from utils.tempmail_service import TempmailService
+                    tm_service = TempmailService(proxies=mail_proxies)
+                    email_list = tm_service.get_inbox(jwt)
+
+                    for msg in email_list:
+                        msg_date = str(msg.get("date", 0))
+                        if not msg_date or msg_date in processed_mail_ids:
+                            continue
+
+                        sender = str(msg.get("from", "")).lower()
+                        subject = str(msg.get("subject", ""))
+                        body = str(msg.get("body", ""))
+                        html = str(msg.get("html") or "")
+
+                        content = "\n".join([sender, subject, body, html])
+
+                        safe_content = re.sub(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", " ", content)
+
+                        if "openai" not in sender and "openai" not in content.lower():
+                            continue
+
+                        code = _extract_otp_code(safe_content)
+                        if code:
+                            processed_mail_ids.add(msg_date)
+                            print(f"\n[{cfg.ts()}] [SUCCESS] Tempmail 提取验证码成功: {code}")
+                            return code
+                except Exception as e:
+                    pass
 
             elif mode == "imap":
                 if not mail_conn:
@@ -614,7 +664,7 @@ def get_oai_code(
                         if "Spam" in folder:
                             print(f"\n[{cfg.ts()}] [DEBUG] 访问垃圾箱失败: {e}")
                 if not found:
-                    print(".", end="", flush=True)
+                    pass
 
             elif mode == "freemail":
                 headers = {
@@ -664,7 +714,7 @@ def get_oai_code(
                                 pass
                         if code:
                             processed_mail_ids.add(mail_id)
-                            print(f" 提取成功: {code}")
+                            print(f"[{cfg.ts()}] [SUCCESS] 提取成功: {code}")
                             return code
             if mode == "luckmail":
                 if not jwt:
@@ -719,15 +769,16 @@ def get_oai_code(
                         m = re.search(pattern, content)
                         if m:
                             processed_mail_ids.add(mail_id)
-                            print(f" 提取成功: {m.group(1)}")
+                            print(f"[{cfg.ts()}] [SUCCESS] 提取成功: {m.group(1)}")
                             return m.group(1)
-                    print(".", end="", flush=True)
+                    pass
                 else:
-                    print(".", end="", flush=True)
+                    pass
 
         except Exception:
-            print(".", end="", flush=True)
-
+            pass
+        if attempt > 0 and attempt % 3 == 0:
+            print(f"[{cfg.ts()}] [INFO] 仍在查询邮箱，暂未收到验证码 (已尝试 {attempt + 1}/20)...")
         time.sleep(3)
 
     print(f"\n[{cfg.ts()}] [ERROR] 接收验证码超时")
