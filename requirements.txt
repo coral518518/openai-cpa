@@ -3,7 +3,7 @@ uvicorn[standard]
 PyYAML 
 pydantic 
 requests
-httpx
+httpx[socks]
 curl_cffi 
 PySocks 
 cloudflare
