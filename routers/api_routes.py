@@ -251,6 +251,12 @@ async def get_stats(token: str = Depends(verify_token)):
     stats = core_engine.run_stats
     is_running = engine.is_running()
     current_reg_mode = getattr(core_engine.cfg, 'REG_MODE', 'protocol')
+
+    if current_reg_mode == 'extension':
+        is_running = stats.get("ext_is_running", False)
+    else:
+        is_running = engine.is_running()
+
     if is_running or (current_reg_mode == 'extension' and stats["start_time"] > 0):
         elapsed = round(time.time() - stats["start_time"], 1) if stats.get("start_time", 0) > 0 else 0
         stats["_frozen_elapsed"] = elapsed
@@ -1013,10 +1019,16 @@ def ext_reset_stats(token: str = Depends(verify_token)):
         "success": 0, "failed": 0, "retries": 0,
         "pwd_blocked": 0, "phone_verify": 0,
         "start_time": time.time(),
-        "target": getattr(core_engine.cfg, 'NORMAL_TARGET_COUNT', 0)
+        "target": getattr(core_engine.cfg, 'NORMAL_TARGET_COUNT', 0),
+        "ext_is_running": True
     })
     return {"status": "success"}
 
+@router.post("/api/ext/stop")
+def ext_stop(token: str = Depends(verify_token)):
+    from utils import core_engine
+    core_engine.run_stats["ext_is_running"] = False
+    return {"status": "success"}
 
 @router.get("/api/mailboxes")
 async def get_mailboxes(page: int = Query(1), page_size: int = Query(50), token: str = Depends(verify_token)):
