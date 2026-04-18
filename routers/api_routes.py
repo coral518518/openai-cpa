@@ -1199,3 +1199,25 @@ def parse_sub2api_proxy(proxy_url: str):
         return proxy_dict
     except:
         return None
+
+@router.post("/api/accounts/export_all")
+async def export_all_accounts(token: str = Depends(verify_token)):
+    data = db_manager.get_all_accounts_raw()
+    return {"status": "success", "data": data}
+
+@router.post("/api/accounts/clear_all")
+async def clear_all_accounts_api(token: str = Depends(verify_token)):
+    if db_manager.clear_all_accounts():
+        return {"status": "success", "message": "账号库已全部清空"}
+    return {"status": "error", "message": "清空失败"}
+
+@router.post("/api/mailboxes/export_all")
+async def export_all_mailboxes(token: str = Depends(verify_token)):
+    data = db_manager.get_all_mailboxes_raw()
+    return {"status": "success", "data": data}
+
+@router.post("/api/mailboxes/clear_all")
+async def clear_all_mailboxes_api(token: str = Depends(verify_token)):
+    if db_manager.clear_all_mailboxes():
+        return {"status": "success", "message": "邮箱库已全部清空"}
+    return {"status": "error", "message": "清空失败"}

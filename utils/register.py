@@ -839,6 +839,14 @@ def run(proxy: Optional[str], run_ctx: dict = None) -> tuple:
 
                 wait_time = random.randint(cfg.LOGIN_DELAY_MIN, cfg.LOGIN_DELAY_MAX)
                 print(f"[{cfg.ts()}] [INFO] （{mask_email(email)}）账号已通过，等待 {wait_time} 秒后同步最终状态...")
+                if cfg.SAVE_TO_LOCAL_IN_CPA_MODE:
+                    # if not is_takeover and password != "Takeover_NoPassword":
+                    try:
+                        from utils import db_manager
+                        db_manager.save_account_to_db(email, password, '{"status": "仅注册成功"}')
+                        print(f"[{cfg.ts()}] [INFO] （{mask_email(email)}）账号已注册成功，提前作为半成品写入本地库。")
+                    except Exception as e:
+                        pass
                 time.sleep(wait_time)
 
                 workspace_hint_url = ""

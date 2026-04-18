@@ -1508,19 +1508,18 @@ createApp({
         },
         async remoteControlNode(nodeName, action) {
             try {
-                // 调用带验证的控制接口
                 const res = await this.authFetch('/api/cluster/control', {
                     method: 'POST',
                     body: JSON.stringify({ node_name: nodeName, action: action })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    this.showToast(`✅ 指令 [${action}] 已成功发送至节点: ${nodeName}`, 'success'); //
+                    this.showToast(`✅ 指令 [${action}] 已成功发送至节点: ${nodeName}`, 'success');
                 } else {
-                    this.showToast(data.message, 'warning'); //
+                    this.showToast(data.message, 'warning');
                 }
             } catch (e) {
-                this.showToast('控制请求异常', 'error'); //
+                this.showToast('控制请求异常', 'error');
             }
         },
         formatDuration(seconds) {
@@ -1883,7 +1882,6 @@ createApp({
                 this.outlookAuth.isGenerating = false;
             }
         },
-
         async submitOutlookAuthCode() {
             this.outlookAuth.isLoading = true;
             try {
@@ -2061,6 +2059,194 @@ createApp({
                     const el = document.getElementById('proxy-intelligence-pool');
                     if (el) el.scrollIntoView({ behavior: 'smooth' });
                 });
+            }
+        },
+        async exportAllAccounts() {
+            try {
+                const res = await this.authFetch('/api/accounts/export_all', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    const allData = data.data;
+                    if (allData.length === 0) {
+                        this.showToast('账号库是空的，无需导出', 'warning');
+                        return;
+                    }
+
+                    const zip = new JSZip();
+                    const timestamp = Math.floor(Date.now() / 1000);
+
+                    const txtContent = allData.map(acc => `${acc.email}----${acc.password}`).join('\n');
+                    zip.file(`accounts_list_${timestamp}.txt`, txtContent);
+
+                    const cpaFolder = zip.folder("cpa");
+                    const sub2apiFolder = zip.folder("sub2api");
+
+                    const proxyUrl = this.config?.sub2api_mode?.default_proxy || "";
+                    const proxyObj = this.parseSub2ApiProxy(proxyUrl);
+                    const proxiesArray = proxyObj ? [proxyObj] : [];
+
+                    const validAccounts = allData.filter(acc => acc.token_data && acc.token_data.access_token);
+
+                    validAccounts.forEach((acc, index) => {
+                        const accEmail = acc.email || "unknown";
+                        const parts = accEmail.split('@');
+                        const prefix = parts[0] || "user";
+                        const domain = parts[1] || "domain";
+
+                        const cpaData = {
+                            ...acc.token_data,
+                            email: accEmail,
+                            password: acc.password
+                        };
+                        cpaFolder.file(`token_${prefix}_${domain}_${timestamp + index}.json`, JSON.stringify(cpaData, null, 4));
+
+                        const accountNode = {
+                            name: accEmail,
+                            platform: "openai",
+                            type: "oauth",
+                            credentials: { refresh_token: acc.token_data.refresh_token || "" },
+                            concurrency: this.config?.sub2api_mode?.account_concurrency || 10,
+                            priority: this.config?.sub2api_mode?.account_priority || 1,
+                            rate_multiplier: this.config?.sub2api_mode?.account_rate_multiplier || 1.0,
+                            extra: { load_factor: this.config?.sub2api_mode?.account_load_factor || 10 }
+                        };
+
+                        if (proxyObj) {
+                            accountNode.proxy_key = proxyObj.proxy_key;
+                        }
+
+                        const sub2apiData = {
+                            exported_at: new Date().toISOString(),
+                            proxies: proxiesArray,
+                            accounts: [accountNode]
+                        };
+                        sub2apiFolder.file(`sub2api_${prefix}_${domain}_${timestamp + index}.json`, JSON.stringify(sub2apiData, null, 4));
+                    });
+
+                    const content = await zip.generateAsync({ type: "blob" });
+                    const url = window.URL.createObjectURL(content);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `OpenAI_Accounts_Bundle_${timestamp}.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+
+                    this.showToast(`成功导出 ${allData.length} 个账号，并已自动注入 Sub2API 代理节点！`, 'success');
+                } else {
+                    this.showToast(data.message || '导出失败', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                this.showToast('导出异常，请检查网络或刷新页面', 'error');
+            }
+        },
+
+        async clearAllAccounts() {
+            const confirmed = await this.customConfirm('⚠️ 危险操作！确定要删除【账号库】中的所有已注册账号吗？此操作不可恢复。');
+            if (!confirmed) return;
+
+            try {
+                const res = await this.authFetch('/api/accounts/clear_all', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    this.showToast('账号库已全部清空', 'success');
+                    this.fetchAccounts();
+                } else {
+                    this.showToast(data.message, 'error');
+                }
+            } catch (e) {
+                this.showToast('清空异常', 'error');
+            }
+        },
+        async exportAllMailboxes() {
+            try {
+                const res = await this.authFetch('/api/mailboxes/export_all', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    const allData = data.data;
+                    if (allData.length === 0) {
+                        this.showToast('邮箱库是空的，无需导出', 'warning');
+                        return;
+                    }
+                    const text = allData.map(m =>
+                        `${m.email}----${m.password}----${m.client_id || ''}----${m.refresh_token || ''}`
+                    ).join('\n');
+
+                    const blob = new Blob([text], { type: 'text/plain' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `Mailboxes_Backup_${new Date().getTime()}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+
+                    this.showToast(`成功导出 ${allData.length} 个邮箱`, 'success');
+                } else {
+                    this.showToast(data.message || '导出失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('导出异常', 'error');
+            }
+        },
+        async clearAllMailboxes() {
+            const confirmed = await this.customConfirm('⚠️ 危险操作！确定要删除【微软邮箱库】中的所有数据吗？');
+            if (!confirmed) return;
+
+            try {
+                const res = await this.authFetch('/api/mailboxes/clear_all', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    this.showToast('邮箱库已全部清空', 'success');
+                    this.fetchMailboxes();
+                } else {
+                    this.showToast(data.message, 'error');
+                }
+            } catch (e) {
+                this.showToast('清空异常', 'error');
+            }
+        },
+        parseSub2ApiProxy(proxyUrl) {
+            if (!proxyUrl) return null;
+            try {
+                let parseUrl = proxyUrl;
+                const originalProtocol = proxyUrl.split('://')[0];
+                if (originalProtocol && !['http', 'https', 'socks4', 'socks5'].includes(originalProtocol)) {
+                     parseUrl = proxyUrl.replace(originalProtocol + '://', 'http://');
+                }
+
+                const url = new URL(parseUrl);
+                const protocol = originalProtocol || url.protocol.replace(':', '');
+                const host = url.hostname;
+                const port = url.port;
+                const username = decodeURIComponent(url.username || '');
+                const password = decodeURIComponent(url.password || '');
+
+                if (!protocol || !host || !port) return null;
+
+                const proxyKey = `${protocol}|${host}|${port}|${username}|${password}`;
+                const proxyDict = {
+                    proxy_key: proxyKey,
+                    name: "openai-cpa",
+                    protocol: protocol,
+                    host: host,
+                    port: parseInt(port),
+                    status: "active"
+                };
+                if (username && password) {
+                    proxyDict.username = username;
+                    proxyDict.password = password;
+                }
+                return proxyDict;
+            } catch (e) {
+                return null;
             }
         },
     }
