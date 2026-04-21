@@ -513,9 +513,13 @@ def get_email_and_token(proxies: Any = None) -> tuple:
         for attempt in range(5):
             if getattr(cfg, 'GLOBAL_STOP', False): return None, None
             try:
+                print(f"1111111111")
+                
                 res = requests.post(f"{cfg.FREEMAIL_API_URL}/api/create",
-                                    json={"email": email_str}, headers=headers,
-                                    proxies=mail_proxies, verify=_ssl_verify(), timeout=15)
+                                    json={"email": email_str}, 
+                                    headers=headers,
+                                    timeout=15)
+                print(f"ssssssssssss")
                 res.raise_for_status()
                 print(f"[{cfg.ts()}] [INFO] 成功通过 Freemail 指定创建邮箱: {mask_email(email_str)}")
                 return email_str, ""
